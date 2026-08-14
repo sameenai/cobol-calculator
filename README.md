@@ -6,20 +6,51 @@ A command-line calculator written in COBOL (GnuCOBOL) that performs basic arithm
 
 ```
 calculator.cob   — Main calculator program (COBOL source code)
-run_tests.sh     — Test suite with 44 test cases (Bash script)
+run_tests.sh     — Language-agnostic test suite (44 test cases, Bash)
+Makefile         — Build commands (COBOL-specific, replace when transcribing)
 .gitignore       — Excludes compiled binary and object files
 README.md        — This file
 ```
+
+### How the files relate to each other
+
+```
+                 ┌─────────────────┐
+                 │  calculator.cob │  ← source code (language-specific)
+                 └────────┬────────┘
+                          │
+                   make build
+                          │
+                          ▼
+                 ┌─────────────────┐
+                 │  ./calculator   │  ← executable entry point
+                 └────────┬────────┘
+                          │
+              invoked by run_tests.sh
+                          │
+                          ▼
+                 ┌─────────────────┐
+                 │  run_tests.sh   │  ← test runner (language-agnostic)
+                 └─────────────────┘
+```
+
+**Critical point:** `run_tests.sh` does NOT compile or build anything. It only invokes `./calculator "<expression>"` and checks the output. The build step is in the `Makefile` and is the ONLY language-specific part of the test pipeline.
 
 ## How to Build
 
 Requires GnuCOBOL (`cobc`) to be installed.
 
 ```bash
+make build
+```
+
+Or directly:
+
+```bash
 cobc -x -o calculator calculator.cob
 ```
 
-This compiles `calculator.cob` into an executable binary called `calculator`.
+This produces an executable binary called `calculator` in the project root.
 
 ## How to Run
 
@@ -48,10 +79,16 @@ This compiles `calculator.cob` into an executable binary called `calculator`.
 ## How to Run Tests
 
 ```bash
+make test
+```
+
+Or, if `./calculator` is already built:
+
+```bash
 ./run_tests.sh
 ```
 
-This compiles the source and runs all 44 test cases, printing PASS/FAIL for each.
+The test runner checks that `./calculator` exists and is executable, then runs all 44 test cases against it.
 
 ## Supported Operators
 
@@ -78,19 +115,20 @@ Every expression must be exactly three tokens separated by spaces:
 
 ## Output Format
 
-- If the result is a whole number, it is displayed as an integer (no decimal point). Example: `5`
+- If the result is a whole number, it is displayed as an integer with NO decimal point. Example: `5`
 - If the result has a fractional component, it is displayed with exactly 4 decimal places. Example: `3.5000`
-- Error messages are prefixed with `Error:` and printed to stdout.
+- Error messages are prefixed with `Error:` and printed to stdout (not stderr).
+- Output is exactly one line with no leading/trailing whitespace.
 
 ## Error Handling
 
 The calculator handles these error conditions:
 
-| Condition                  | Output                                          |
+| Condition                  | Exact Output                                    |
 |----------------------------|-------------------------------------------------|
 | Division by zero           | `Error: division by zero`                       |
 | Modulo by zero             | `Error: modulo by zero`                         |
-| Unknown operator           | `Error: unknown operator X` (where X is the operator) |
+| Unknown operator           | `Error: unknown operator X` (where X is the char) |
 | Malformed expression       | `Error: expected format <number> <op> <number>` |
 | Empty input (batch mode)   | `Error: empty input`                            |
 
@@ -106,8 +144,8 @@ The program is a single COBOL source file organized into these sections:
 | `WS-LEFT-STR`        | `PIC X(20)`         | Left operand as a string during parsing       |
 | `WS-RIGHT-STR`       | `PIC X(20)`         | Right operand as a string during parsing      |
 | `WS-OPERATOR`        | `PIC X(1)`          | The operator character                        |
-| `WS-LEFT`            | `PIC S9(10)V9(4)`   | Left operand as a numeric value (signed, 10 integer digits, 4 decimal places) |
-| `WS-RIGHT`           | `PIC S9(10)V9(4)`   | Right operand as a numeric value              |
+| `WS-LEFT`            | `PIC S9(10)V9(4)`   | Left operand as numeric (signed, 10 int digits, 4 decimal) |
+| `WS-RIGHT`           | `PIC S9(10)V9(4)`   | Right operand as numeric                      |
 | `WS-RESULT`          | `PIC S9(10)V9(4)`   | Calculation result                            |
 | `WS-ERROR-FLAG`      | `PIC 9`             | 0 = no error, 1 = error occurred              |
 | `WS-BATCH-MODE`      | `PIC 9`             | 0 = interactive mode, 1 = batch mode          |
@@ -115,25 +153,23 @@ The program is a single COBOL source file organized into these sections:
 
 ### Procedure Division (Logic Flow)
 
-The program executes in this order:
-
 1. **MAIN-PROGRAM** — Entry point. Checks if command-line arguments exist. If yes, processes the single expression and exits (batch mode). If no, enters an interactive loop that reads expressions until the user types QUIT.
 
 2. **PARSE-INPUT** — Validates that input is non-empty, then calls PARSE-LOOP.
 
 3. **PARSE-LOOP** — A character-by-character state machine that splits the input string into three parts:
-   - State 0: Accumulate characters into `WS-LEFT-STR` until a space is found.
+   - State 0: Accumulate characters into left operand string until a space is found.
    - State 1: Skip spaces, then capture the operator character.
    - State 2: Skip the space after the operator.
-   - State 3: Accumulate characters into `WS-RIGHT-STR`.
+   - State 3: Accumulate characters into right operand string.
    
    After parsing, converts the string operands to numeric values using `FUNCTION NUMVAL`.
 
-4. **DO-CALCULATION** — An `EVALUATE` statement (equivalent to switch/case) that dispatches to the correct arithmetic operation based on `WS-OPERATOR`. Checks for division/modulo by zero before computing.
+4. **DO-CALCULATION** — An `EVALUATE` statement (equivalent to switch/case) that dispatches to the correct arithmetic operation based on the operator. Checks for division/modulo by zero before computing.
 
-5. **POWER-CALC** — Implements exponentiation via a loop (multiply the base by itself N times). COBOL has no built-in power operator, so this is done manually. Uses a separate loop counter (`WS-POWER-IDX`) to avoid conflicting with the parsing loop counter.
+5. **POWER-CALC** — Implements exponentiation via a loop (multiply the base by itself N times). COBOL has no built-in power operator so this is done manually.
 
-6. **DISPLAY-RESULT** — Checks if the result has a fractional part. If the fractional part is zero, displays as an integer. Otherwise displays with 4 decimal places.
+6. **DISPLAY-RESULT** — Checks if the result has a fractional part. If zero, displays as integer. Otherwise displays with 4 decimal places.
 
 ### Numeric Precision
 
@@ -145,12 +181,15 @@ The program executes in this order:
 
 ## Test Suite (run_tests.sh)
 
-The test runner is a Bash script that:
-1. Compiles `calculator.cob` using `cobc -x`
-2. For each test case, invokes `./calculator "<expression>"` and captures stdout
-3. Compares the actual output to the expected output (exact string match after trimming whitespace)
+**The test runner is completely language-agnostic.** It does not know or care what language the calculator is written in. It:
+
+1. Checks that `./calculator` exists and is executable
+2. For each test case, invokes `./calculator "<expression>"` and captures stdout+stderr
+3. Compares actual output to expected output (exact string match after whitespace trimming)
 4. Prints color-coded PASS/FAIL results
 5. Exits with code 0 if all pass, code 1 if any fail
+
+**The test runner does NOT build, compile, or install anything.** Building is handled separately by the `Makefile`.
 
 ### Complete Test Case List
 
@@ -226,16 +265,129 @@ The test runner is a Bash script that:
 | `42`          | `Error: expected format <number> <op> <number>`   |
 | `+ +`         | `Error: expected format <number> <op> <number>`   |
 
-## Transcription Notes for AI Agents
+---
 
-If you are transcribing this to another language, here is what to preserve:
+## Transcription Guide for AI Agents
 
-1. **Interface contract**: The program must accept a single command-line argument in the format `"<number> <operator> <number>"` and print exactly one line of output (the result or an error message). It must also support an interactive REPL mode when no arguments are given.
+If you are transcribing this calculator to another programming language, read this entire section carefully before writing any code.
 
-2. **Operator behavior**: All six operators (`+ - * / ^ %`) must be supported. Exponentiation only needs to handle non-negative integer exponents.
+### What you are producing
 
-3. **Output formatting**: Whole-number results display without decimals. Fractional results display with 4 decimal places.
+You must produce exactly these files:
 
-4. **Error messages**: Must match exactly as specified in the Error Handling table above (the test suite does exact string matching).
+| File           | Purpose                                              |
+|----------------|------------------------------------------------------|
+| `calculator`   | The executable entry point (see details below)       |
+| `run_tests.sh` | **COPY THIS FILE UNCHANGED** from the original repo  |
+| `Makefile`     | Updated for your language's build commands           |
 
-5. **Test suite**: The `run_tests.sh` script should work with any compiled binary named `calculator` that follows the interface contract above. You can rewrite the calculator in any language as long as it compiles/runs as `./calculator "<expression>"`.
+### The `calculator` executable — THIS IS THE KEY REQUIREMENT
+
+The test runner calls `./calculator "<expression>"`. This means there MUST be a file named exactly `calculator` (no extension) in the project root that is executable.
+
+**For compiled languages** (C, Go, Rust, etc.):
+- Your Makefile compiles your source into a binary named `calculator`
+- Example Makefile: `build: go build -o calculator main.go`
+
+**For interpreted languages** (Python, Ruby, Node, etc.):
+- Create a file named `calculator` (NOT `calculator.py`, NOT `calculator.rb`)
+- The file must have a shebang line as the first line
+- The file must be executable (`chmod +x calculator`)
+
+Example for Python — the file must be named `calculator` (no `.py` extension):
+```python
+#!/usr/bin/env python3
+import sys
+
+# ... your calculator logic here ...
+
+if __name__ == "__main__":
+    expression = " ".join(sys.argv[1:])
+    # process and print result
+```
+
+Example for Node.js — the file must be named `calculator` (no `.js` extension):
+```javascript
+#!/usr/bin/env node
+
+const expression = process.argv.slice(2).join(' ');
+// ... your calculator logic here ...
+```
+
+### The `run_tests.sh` file — DO NOT MODIFY
+
+Copy `run_tests.sh` exactly as-is into your transcribed project. Do not rewrite it in another language. Do not modify how it invokes the calculator. It calls `./calculator "<expression>"` and that must work.
+
+### The `Makefile` — ADAPT FOR YOUR LANGUAGE
+
+Replace the COBOL build command with whatever your language needs:
+
+```makefile
+# Python example (just needs chmod):
+build:
+	chmod +x calculator
+
+test: build
+	./run_tests.sh
+
+# Go example:
+build:
+	go build -o calculator main.go
+
+test: build
+	./run_tests.sh
+
+# Rust example:
+build:
+	cargo build --release
+	cp target/release/calculator .
+
+test: build
+	./run_tests.sh
+```
+
+### Behavioral contract to preserve
+
+1. **CLI interface**: `./calculator "<expression>"` receives the full expression as a single command-line argument string (e.g., `sys.argv[1]` in Python contains `"2 + 3"`). Print exactly one line to stdout and exit.
+
+2. **Interactive mode**: When invoked with no arguments (`./calculator`), enter a REPL that prints `> ` as a prompt, reads a line, processes it, prints the result, and repeats. Exit when the user types `QUIT` (case-insensitive).
+
+3. **Output formatting**:
+   - Integer results: print with NO decimal point (e.g., `5`, NOT `5.0`, NOT `5.0000`)
+   - Fractional results: print with EXACTLY 4 decimal places (e.g., `3.5000`, NOT `3.5`)
+   - No leading/trailing whitespace in output
+
+4. **Error messages**: Print to stdout (NOT stderr). Must match EXACTLY:
+   - `Error: division by zero`
+   - `Error: modulo by zero`
+   - `Error: unknown operator X` (where X is the actual character)
+   - `Error: expected format <number> <op> <number>`
+   - `Error: empty input`
+
+5. **Operator behavior**:
+   - `+` addition
+   - `-` subtraction
+   - `*` multiplication
+   - `/` true division (not integer division)
+   - `^` exponentiation (integer exponents only, 0-999)
+   - `%` modulo
+
+6. **Parsing**: Split on spaces. The expression is always `<number> <space> <operator> <space> <number>`. Negative numbers have the minus attached (e.g., `-5 + 3` is three tokens: `-5`, `+`, `3`).
+
+### Common transcription mistakes to avoid
+
+- **DO NOT** name your source file `calculator.py` or `calculator.js` and then try to invoke it as `./calculator.py`. The entry point must be named `calculator` with no extension.
+- **DO NOT** put a compilation/build step inside `run_tests.sh`. That file must remain unchanged.
+- **DO NOT** print results to stderr. All output (results AND errors) goes to stdout.
+- **DO NOT** print `5.0` or `5.0000` for integer results. Print `5`.
+- **DO NOT** print `3.5` for fractional results. Print `3.5000` (exactly 4 decimal places).
+- **DO NOT** add extra output like "Result: 5" or blank lines. Output is exactly one line: the number or the error message.
+
+### Verification
+
+After transcription, run:
+```bash
+make test
+```
+
+All 44 tests must pass. If they don't, the transcription has a bug — check output formatting first (that's the most common failure).

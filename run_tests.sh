@@ -1,6 +1,18 @@
 #!/bin/bash
-# Test runner for the COBOL calculator
-# Compiles calculator.cob and runs test cases against it
+# Test runner for the calculator.
+# This script is LANGUAGE-AGNOSTIC. It assumes an executable called
+# "./calculator" already exists in this directory. It does NOT compile
+# or build anything — that is the job of the Makefile or build script.
+#
+# To use after transcription to another language:
+#   1. Ensure "./calculator" is an executable file in this directory.
+#      - For compiled languages: compile your source to a binary named "calculator"
+#      - For interpreted languages: create a file named "calculator" with a
+#        shebang line (e.g. #!/usr/bin/env python3) and chmod +x it
+#   2. Run: ./run_tests.sh
+#
+# The test runner invokes: ./calculator "<expression>"
+# and expects exactly one line of output on stdout.
 
 set -e
 
@@ -12,13 +24,19 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo "=== COBOL Calculator Test Suite ==="
-echo ""
+# Check that ./calculator exists and is executable
+if [ ! -f ./calculator ]; then
+    echo "Error: ./calculator not found."
+    echo "Build it first (e.g. 'make build') or ensure the file exists."
+    exit 1
+fi
 
-# Compile
-echo "Compiling calculator.cob..."
-cobc -x -o calculator calculator.cob
-echo "Compilation successful."
+if [ ! -x ./calculator ]; then
+    echo "Error: ./calculator is not executable. Run: chmod +x calculator"
+    exit 1
+fi
+
+echo "=== Calculator Test Suite ==="
 echo ""
 
 run_test() {
